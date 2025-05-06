@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+google-generativeai
+requests # For potential future HTTP calls if needed
+Pillow # For image processing if needed
+python-multipart # Added for file uploads
+sqlalchemy
+psycopg2-binary # PostgreSQL driver
+alembic # For database migrations (optional but recommended)
+PyMuPDF # Added for PDF processing

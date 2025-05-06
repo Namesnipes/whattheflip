@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15 # Use a specific PostgreSQL version
+    container_name: whattheflip_db
+    environment:
+      POSTGRES_USER: user # Define your desired username
+      POSTGRES_PASSWORD: password # Define your desired password
+      POSTGRES_DB: whattheflipdb # Define your desired database name
+    volumes:
+      - postgres_data:/var/lib/postgresql/data # Persist data across container restarts
+    ports:
+      - "5432:5432" # Map host port 5432 to container port 5432
+    networks:
+      - whattheflip_network
+
+  backend:
+    build: ./backend # Build the backend image from the backend directory
+    container_name: whattheflip_backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload # Command to run the server
+    volumes:
+      - ./backend:/app # Mount the backend code into the container for live reload
+    ports:
+      - "8001:8000" # Map host port 8001 to container port 8000 (avoiding host port 8000 conflict)
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/whattheflipdb # Use service name 'db' as hostname
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY} # Pass the API key from the host environment or a .env file in the root
+    depends_on:
+      - db # Ensure the database starts before the backend
+    networks:
+      - whattheflip_network
+
+volumes:
+  postgres_data: # Define the named volume for data persistence
+
+networks:
+  whattheflip_network: # Define the network for services to communicate
+    driver: bridge
