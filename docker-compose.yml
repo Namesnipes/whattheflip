@@ -31,6 +31,21 @@ services:
     networks:
       - whattheflip_network
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: whattheflip_frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app # Mount the frontend code for live reload
+      - /app/node_modules # Don't mount node_modules from host
+    depends_on:
+      - backend # Optional: ensure backend is ready before frontend (might need healthchecks for true readiness)
+    networks:
+      - whattheflip_network
+
 volumes:
   postgres_data: # Define the named volume for data persistence
 

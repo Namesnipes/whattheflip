@@ -8,9 +8,9 @@ export default defineConfig({
     proxy: {
       // Proxy API requests to the backend server
       '/api': {
-        target: 'http://localhost:8001', // Updated port to 8001
+        target: 'http://backend:8000',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ''), // Remove /api prefix
+        rewrite: (path) => path.replace(/^\/api/, ''), // Remove /api prefix before forwarding
       },
     },
   },
