@@ -24,11 +24,18 @@ interface MealPlan {
   shopping_list: string[];
 }
 
-// Interface for the expected response from our backend processing endpoint
-interface ProcessFlyerResponse extends MealPlan {
-  // Potentially add other fields returned by the backend after processing
-  status: string; // e.g., 'success', 'error'
-  message?: string; // Optional message from backend
+// Interface for the response from the /flyer/fetch-and-store/ endpoint
+interface FetchedFlyerInfo {
+  flipp_flyer_id: number;
+  merchant_name: string;
+  image_path: string; // Path to the image on the server
+  postal_code: string;
+  message: string;
+}
+
+// Interface for the meal plan generation request
+interface MealPlanGenerationRequest {
+  store_name: string;
 }
 
 function App() {
@@ -41,7 +48,9 @@ function App() {
   const [mealPlan, setMealPlan] = useState<MealPlan | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false); // Renamed from isGenerating
   const [processingError, setProcessingError] = useState<string | null>(null); // Renamed from generationError
+  const [processingMessage, setProcessingMessage] = useState<string | null>(null); // For general status updates
   const [selectedFlyerId, setSelectedFlyerId] = useState<number | null>(null); // To track selected flyer for processing
+  const [selectedFlyer, setSelectedFlyer] = useState<FlippFlyer | null>(null);
 
   // Fetch Flipp Flyers on component mount
   useEffect(() => {
@@ -90,72 +99,102 @@ function App() {
 
   // --- Flyer Selection and Processing Logic ---
   const handleFlyerSelection = async (flyerId: number | null) => {
-    console.log("handleFlyerSelection called with flyerId:", flyerId); // <-- Add log here
+    console.log("handleFlyerSelection called with flyerId:", flyerId);
     if (flyerId == null) {
-      setProcessingError("Invalid flyer selected.");
+      setProcessingError("Invalid flyer ID provided.");
       return;
     }
 
-    // If already processing this flyer, don't do anything
+    const currentFlyer = groceryFlyers.find(f => f.id === flyerId);
+    if (!currentFlyer) {
+      setProcessingError("Selected flyer not found in the list.");
+      return;
+    }
+
     if (isProcessing && selectedFlyerId === flyerId) {
       return;
     }
 
-    // Clear previous errors/results and set processing state
     setProcessingError(null);
+    setProcessingMessage("Starting flyer processing..."); // Initial message
     setIsProcessing(true);
-    setMealPlan(null); // Clear previous meal plan
+    setMealPlan(null);
     setSelectedFlyerId(flyerId);
+    setSelectedFlyer(currentFlyer); // Store the whole flyer object
 
-    console.log(`Processing flyer ID: ${flyerId}...`);
+    console.log(`Processing flyer ID: ${flyerId}, Store: ${currentFlyer.merchant}`);
 
     try {
-      // ** TODO: Replace with actual backend API call **
-      // This endpoint should handle fetching flyer details, extracting items,
-      // and generating the meal plan/shopping list.
-      // const backendUrl = `/api/flyers/${flyerId}/process`; // Example backend endpoint
-      // const response = await fetch(backendUrl, { method: 'POST' }); // Or GET, depending on backend design
-
-      // Simulate backend call and processing delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      // Simulate a successful response from the backend
-      const demoResponse: ProcessFlyerResponse = {
-        status: 'success',
-        meal_plan: {
-          "Monday": `Pasta based on Flyer ${flyerId} deals`,
-          "Tuesday": `Chicken stir-fry from Flyer ${flyerId}`,
-          "Wednesday": `Tacos using Flyer ${flyerId} items`,
-          "Thursday": `Soup and Salad (Flyer ${flyerId})`,
-          "Friday": `Pizza night (Flyer ${flyerId} ingredients)`
+      // Step 1: Call /flyer/fetch-and-store/
+      setProcessingMessage(`Fetching and preparing flyer for ${currentFlyer.merchant}...`);
+      const fetchStoreResponse = await fetch("/api/flyer/fetch-and-store/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-        shopping_list: [
-          `Item A from Flyer ${flyerId}`, `Item B from Flyer ${flyerId}`,
-          `Item C from Flyer ${flyerId}`, `Milk`, `Eggs`
-        ]
-      };
+        body: JSON.stringify({
+          merchant_name: currentFlyer.merchant,
+          postal_code: "V1P0A1", // TODO: Make postal code dynamic if needed
+          // category: "Groceries" // Optional, defaults in backend
+        }),
+      });
 
-      // if (!response.ok) {
-      //   const errorData = await response.json().catch(() => ({ message: `HTTP error! status: ${response.status}` }));
-      //   throw new Error(errorData.message || `Backend error! status: ${response.status}`);
-      // }
-      // const result: ProcessFlyerResponse = await response.json();
-
-      const result = demoResponse; // Using simulated response
-
-      if (result.status === 'success') {
-        setMealPlan({ meal_plan: result.meal_plan, shopping_list: result.shopping_list });
-      } else {
-        throw new Error(result.message || 'Backend processing failed.');
+      if (!fetchStoreResponse.ok) {
+        const errorData = await fetchStoreResponse.json().catch(() => ({ message: `Fetching flyer failed with status: ${fetchStoreResponse.status}` }));
+        throw new Error(errorData.detail || errorData.message || `Failed to fetch or store flyer. Status: ${fetchStoreResponse.status}`);
       }
 
+      const fetchedFlyerInfo: FetchedFlyerInfo = await fetchStoreResponse.json();
+      console.log("Flyer fetched/stored successfully:", fetchedFlyerInfo.message);
+      setProcessingMessage(`Flyer ready. Extracting items from ${currentFlyer.merchant} flyer...`);
+
+      // Step 2: Call /flyer/extract/ using the image_path from Step 1
+      const formData = new FormData();
+      formData.append("store_name", currentFlyer.merchant);
+      formData.append("image_path", fetchedFlyerInfo.image_path);
+      // No need to append file if image_path is used
+
+      const extractResponse = await fetch("/api/flyer/extract/", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!extractResponse.ok) {
+        const errorData = await extractResponse.json().catch(() => ({ message: `Extraction failed with status: ${extractResponse.status}` }));
+        throw new Error(errorData.detail || errorData.message || `Failed to extract items. Status: ${extractResponse.status}`);
+      }
+
+      const extractionResult = await extractResponse.json();
+      console.log("Extraction successful:", extractionResult.message);
+      setProcessingMessage(`Items extracted. Generating meal plan for ${currentFlyer.merchant}...`);
+
+      // Step 3: Generate meal plan using /mealplan/generate/
+      console.log(`Generating meal plan for store: ${currentFlyer.merchant}`);
+      const mealPlanRequestData: MealPlanGenerationRequest = { store_name: currentFlyer.merchant };
+
+      const mealplanResponse = await fetch("/api/mealplan/generate/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(mealPlanRequestData),
+      });
+
+      if (!mealplanResponse.ok) {
+        const errorData = await mealplanResponse.json().catch(() => ({ message: `Meal plan generation failed with status: ${mealplanResponse.status}` }));
+        throw new Error(errorData.message || `Failed to generate meal plan. Status: ${mealplanResponse.status}`);
+      }
+
+      const mealPlanResult: MealPlan = await mealplanResponse.json();
+      setMealPlan(mealPlanResult);
+      console.log("Meal plan generated successfully.");
+      setProcessingMessage("Meal plan complete!");
+
     } catch (err) {
-      console.error("Error processing flyer:", err);
-      setProcessingError(err instanceof Error ? err.message : "Failed to process flyer. Please try again.");
+      console.error("Error during flyer processing or meal plan generation:", err);
+      setProcessingError(err instanceof Error ? err.message : "An unknown error occurred.");
     } finally {
       setIsProcessing(false);
-      // Optionally clear selectedFlyerId here or keep it to indicate the last processed flyer
-      // setSelectedFlyerId(null);
     }
   };
 
@@ -203,14 +242,15 @@ function App() {
 
       {/* Meal Plan Display Section */}
       {processingError && <div className="error-message">{processingError}</div>}
-      {isProcessing && !mealPlan && selectedFlyerId !== null && (
+      {isProcessing && selectedFlyerId !== null && !mealPlan && (
         <div className="loading-message">
-          <span className="loader"></span> Processing flyer and generating plan...
+          <span className="loader"></span> 
+          {processingMessage || (selectedFlyer ? `Processing ${selectedFlyer.merchant} flyer and generating plan...` : 'Processing flyer and generating plan...')}
         </div>
       )}
-      {mealPlan && (
+      {mealPlan && selectedFlyer && (
         <div className="card">
-           <h2>Your 5-Day Meal Plan (Based on Flyer {selectedFlyerId})</h2>
+           <h2>Your 5-Day Meal Plan (Based on {selectedFlyer.merchant} Flyer)</h2>
            <div className="meal-plan-days">
              <h3>Dinner Plan</h3>
              <ul className="item-list">
